@@ -17,4 +17,3 @@ python src/segmentation_utils/segmentation_overlap.py \
 
 echo "Mask overlap processing completed!"
 echo "Final images saved to: correct_defected"
-
