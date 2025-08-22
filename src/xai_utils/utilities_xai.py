@@ -1,8 +1,10 @@
 # PyTorch Imports
 import torch
-import torch.nn as nn  
+import torch.nn as nn
+import torch.nn.functional as F
 from PIL import Image
-from monai.visualize import CAM, GradCAM, GradCAMpp, GuidedBackpropGrad, GuidedBackpropSmoothGrad, SmoothGrad, VanillaGrad
+import numpy as np
+from scipy.ndimage import gaussian_filter
 
 # Captum Imports
 from captum.attr import (
@@ -11,7 +13,13 @@ from captum.attr import (
     GuidedGradCam,
 )
 
-# Function: Compute IntegratedGradients
+# MONAI Imports (conditional)
+try:
+    from monai.visualize import CAM, GradCAM, GradCAMpp, GuidedBackpropGrad, GuidedBackpropSmoothGrad, SmoothGrad, VanillaGrad
+    MONAI_AVAILABLE = True
+except ImportError:
+    MONAI_AVAILABLE = False
+
 def compute_integrated_gradients(model, query_tensor, neighbor_tensor, baseline=None, steps=50):
     """
     Compute IG attributions using L2 distance (consistent with retrieval).
@@ -19,13 +27,44 @@ def compute_integrated_gradients(model, query_tensor, neighbor_tensor, baseline=
     if baseline is None:
         baseline = 0 * neighbor_tensor  # Black image baseline
     
-    neighbor_tensor.requires_grad_()
+    # Ensure tensors require gradients
+    neighbor_tensor = neighbor_tensor.clone().requires_grad_(True)
+    query_tensor = query_tensor.clone().requires_grad_(True)
     
     def similarity_fn(neighbor_input):
-        with torch.no_grad():
-            query_embed = model(query_tensor)
-        neighbor_embed = model(neighbor_input)
-        return -torch.norm(query_embed - neighbor_embed, p=2).unsqueeze(0)  # Negative for maximization
+        # Ensure we're in training mode for gradient computation
+        original_mode = model.training
+        model.train()
+        
+        try:
+            # Handle ensemble models
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                # Ensure each model is in training mode
+                for m in model.models:
+                    m.train()
+                query_embed = torch.mean(torch.stack([m(query_tensor) for m in model.models]), dim=0)
+            else:
+                model.train()
+                query_embed = model(query_tensor)
+                
+            # Handle ensemble models for neighbor
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                neighbor_embed = torch.mean(torch.stack([m(neighbor_input) for m in model.models]), dim=0)
+            else:
+                neighbor_embed = model(neighbor_input)
+                
+            # Compute similarity (negative distance for maximization)
+            similarity = -torch.norm(query_embed - neighbor_embed, p=2)
+            
+            return similarity.unsqueeze(0)
+            
+        finally:
+            # Restore original mode
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                for m in model.models:
+                    m.train(original_mode)
+            else:
+                model.train(original_mode)
     
     ig = IntegratedGradients(similarity_fn)
     
@@ -35,69 +74,123 @@ def compute_integrated_gradients(model, query_tensor, neighbor_tensor, baseline=
         baselines=baseline,
         n_steps=steps,
         internal_batch_size=1,
-        return_convergence_delta=False  # Avoid tensor issues
+        return_convergence_delta=False
     )
     
-    # Verification
-    with torch.no_grad():
-        original_dist = -similarity_fn(neighbor_tensor).item()  # Get actual L2 distance
-        print(f"\n[DEBUG] Original L2 distance: {original_dist:.4f}")
-        
-        mask = (attributions.abs() > attributions.abs().mean()).float()
-        masked_dist = -similarity_fn(neighbor_tensor * mask).item()
-        print(f"[DEBUG] Masked L2 distance: {masked_dist:.4f}")
-        print(f"[DEBUG] Distance increase: {masked_dist - original_dist:.4f}")
-    
     return attributions
-
-def get_xai_attribution(model, in_tensor, method, backend='Captum', reference_tensor=None):
-    """Unified XAI computation for both backends"""
-    if backend == 'Captum':
-        if method == 'IntegratedGradients':
-            if reference_tensor is None:
-                reference_tensor = in_tensor
-            return compute_integrated_gradients(
-                model=model,
-                query_tensor=reference_tensor,
-                neighbor_tensor=in_tensor
-            )
+    
+def compute_input_x_gradient(model, in_tensor, target):
+    """Compute Input X Gradient attributions"""
+    in_tensor.requires_grad_()
+    
+    def similarity_fn(input_tensor):
+        # Handle ensemble models
+        if hasattr(model, 'models') and isinstance(model.models, list):
+            output = torch.mean(torch.stack([m(input_tensor) for m in model.models]), dim=0)
         else:
-            return compute_attributions(
-                model=model,
-                in_tensor=in_tensor,
-                target=0,  # For classification-style methods
-                method=method
-            )
+            output = model(input_tensor)
+        return output[:, target]  # For classification-style methods
+    
+    ixg = InputXGradient(similarity_fn)
+    attribution = ixg.attribute(inputs=in_tensor, target=target)
+    return attribution
+
+def compute_guided_grad_cam(model, model_last_conv_layer, in_tensor, target):
+    """Compute Guided GradCAM attributions"""
+    in_tensor.requires_grad_()
+    
+    def similarity_fn(input_tensor):
+        # Handle ensemble models - use first model for Guided GradCAM
+        if hasattr(model, 'models') and isinstance(model.models, list):
+            output = model.models[0](input_tensor)
+        else:
+            output = model(input_tensor)
+        return output[:, target]
+    
+    ggc = GuidedGradCam(similarity_fn, model_last_conv_layer)
+    attribution = ggc.attribute(inputs=in_tensor, target=target)
+    return attribution
+
+def compute_attributions(model, in_tensor, target, method, **kwargs):
+    """Compute attributions using specified method"""
+    device = next(model.parameters()).device
+    in_tensor = in_tensor.to(device)
+    
+    assert method in (
+        'IntegratedGradients',
+        'InputXGradient',
+        'GuidedGradCam',
+    ), 'Please provide a valid Captum method.'
+
+    # Select attribution method
+    if method == 'IntegratedGradients':
+        attribution = compute_integrated_gradients(model, in_tensor, in_tensor)
+    elif method == 'InputXGradient':
+        attribution = compute_input_x_gradient(model, in_tensor, target)
+    elif method == 'GuidedGradCam':
+        if 'model_last_conv_layer' not in kwargs:
+            raise ValueError("GuidedGradCam requires model_last_conv_layer parameter")
+        attribution = compute_guided_grad_cam(model, kwargs['model_last_conv_layer'], in_tensor, target)
+    
+    return attribution.to(device)
+
+def compute_monai_results(in_tensor, class_idx, method, model):
+    """Compute attributions using MONAI methods"""
+    if not MONAI_AVAILABLE:
+        raise ImportError("MONAI is not available. Please install it or use Captum methods.")
+    
+    # Handle ensemble models - use first model for MONAI
+    if hasattr(model, 'models') and isinstance(model.models, list):
+        model_to_use = model.models[0]
     else:
-        return compute_monai_results(
-            in_tensor=in_tensor,
-            class_idx=0,
-            method=method,
-            model=model
-        )
+        model_to_use = model
+    
+    if method == 'GradCAM':
+        gradcam = GradCAM(model_to_use, target_layers="features.17")
+        return gradcam(in_tensor, class_idx)
+    elif method == 'GradCAMpp':
+        gradcampp = GradCAMpp(model_to_use, target_layers="features.17")
+        return gradcampp(in_tensor, class_idx)
+    elif method == 'CAM':
+        cam = CAM(model_to_use, target_layers="features.17")
+        return cam(in_tensor, class_idx)
+    elif method == 'GuidedBackpropGrad':
+        gbp = GuidedBackpropGrad(model_to_use)
+        return gbp(in_tensor, class_idx)
+    elif method == 'GuidedBackpropSmoothGrad':
+        gbps = GuidedBackpropSmoothGrad(model_to_use)
+        return gbps(in_tensor, class_idx)
+    elif method == 'SmoothGrad':
+        sg = SmoothGrad(model_to_use)
+        return sg(in_tensor, class_idx)
+    elif method == 'VanillaGrad':
+        vg = VanillaGrad(model_to_use)
+        return vg(in_tensor, class_idx)
+    else:
+        raise ValueError(f"Unknown MONAI method: {method}")
 
 def compute_sbsm(query_tensor, neighbor_tensor, model, block_size=24, stride=12):
     """
     SBSM (Similarity-Based Saliency Map) for any CNN that outputs flat feature vectors.
-    Includes debug logging. Works for VGG, DenseNet, etc. Not MONAI, need to remove it
+    Includes debug logging. Works for VGG, DenseNet, etc.
     """
     device = next(model.parameters()).device
     query_tensor = query_tensor.to(device)
     neighbor_tensor = neighbor_tensor.to(device)
 
-    print("[DEBUG] Running SBSM with block_size =", block_size, ", stride =", stride)
-
     # Extract base embeddings
     with torch.no_grad():
-        query_feat = model(query_tensor)
-        base_feat = model(neighbor_tensor)
-
-        print("[DEBUG] Output shapes - query:", query_feat.shape, ", neighbor:", base_feat.shape)
+        # Handle ensemble models
+        if hasattr(model, 'models') and isinstance(model.models, list):
+            query_feat = torch.mean(torch.stack([m(query_tensor) for m in model.models]), dim=0)
+            base_feat = torch.mean(torch.stack([m(neighbor_tensor) for m in model.models]), dim=0)
+        else:
+            query_feat = model(query_tensor)
+            base_feat = model(neighbor_tensor)
 
         query_feat = query_feat.flatten(1)
         base_feat = base_feat.flatten(1)
         base_dist = F.pairwise_distance(query_feat, base_feat, p=2).item()
-        print("[DEBUG] L2 distance between query and neighbor:", base_dist)
 
     # Prepare saliency map
     _, _, H, W = neighbor_tensor.shape
@@ -117,15 +210,19 @@ def compute_sbsm(query_tensor, neighbor_tensor, model, block_size=24, stride=12)
     if not mask_batch:
         raise RuntimeError("No masks generated. Check block_size and stride vs. input image dimensions.")
 
-    print(f"[DEBUG] Total masked patches to evaluate: {len(mask_batch)}")
-
     # Batch processing
     mask_batch = torch.cat(mask_batch, dim=0).to(device)
     repeated_neighbor = neighbor_tensor.repeat(mask_batch.shape[0], 1, 1, 1)
     masked_imgs = repeated_neighbor * mask_batch
 
     with torch.no_grad():
-        masked_feats = model(masked_imgs).flatten(1)
+        # Handle ensemble models
+        if hasattr(model, 'models') and isinstance(model.models, list):
+            masked_feats = torch.mean(torch.stack([m(masked_imgs) for m in model.models]), dim=0)
+        else:
+            masked_feats = model(masked_imgs)
+            
+        masked_feats = masked_feats.flatten(1)
         dists = F.pairwise_distance(query_feat.expand_as(masked_feats), masked_feats, p=2)
 
     for idx, (y, x) in enumerate(positions):
@@ -143,96 +240,67 @@ def compute_sbsm(query_tensor, neighbor_tensor, model, block_size=24, stride=12)
         saliency = (saliency - saliency.min()) / (saliency.max() - saliency.min() + 1e-8)
     saliency = gaussian_filter(saliency, sigma=min(block_size // 6, 3))
 
-    print("[DEBUG] Final saliency map shape:", saliency.shape)
     return saliency
 
-
-
-
 def compute_cam_pytorch(in_tensor, reference_embedding, nn_module, target_layer_name="features.17"):
-    #Modified CAM computation for VGG16_Base_224
+    """Modified CAM computation for VGG16_Base_224 with ensemble support"""
     try:
-        # 1. Model preparation
-        model_to_use = nn_module
-        print(f"[DEBUG] Model type: {type(model_to_use).__name__}")
+        # Handle ensemble models - use first model for CAM
+        if hasattr(nn_module, 'models') and isinstance(nn_module.models, list):
+            model_to_use = nn_module.models[0]
+        else:
+            model_to_use = nn_module
         
-        # 2. Verify target layer
-        print(f"[DEBUG] Target layer: {target_layer_name}")
+        # Verify target layer
         try:
             if isinstance(target_layer_name, str):
-                module = model_to_use.features  # Access features directly
-                for part in target_layer_name.split('.')[1:]:  # Skip 'features' prefix
+                module = model_to_use.features
+                for part in target_layer_name.split('.')[1:]:
                     module = getattr(module, part)
                 target_layer = module
             else:
                 target_layer = target_layer_name
-            print(f"[DEBUG] Layer found: {target_layer}")
-            print(f"[DEBUG] Layer type: {type(target_layer).__name__}")
-            print(f"[DEBUG] Layer weight shape: {target_layer.weight.shape if hasattr(target_layer, 'weight') else 'N/A'}")
         except Exception as e:
-            print(f"[DEBUG] Layer access failed: {str(e)}")
-            raise
+            raise RuntimeError(f"Layer access failed: {str(e)}")
 
-        # 3. Hook setup
+        # Hook setup
         activations = []
         gradients = []
         
         def forward_hook(module, input, output):
-            print(f"[DEBUG] Forward hook - output shape: {output.shape}")
             activations.append(output.detach())
             
         def backward_hook(module, grad_input, grad_output):
-            print(f"[DEBUG] Backward hook - grad_output[0] shape: {grad_output[0].shape}")
             gradients.append(grad_output[0].detach())
         
         forward_handle = target_layer.register_forward_hook(forward_hook)
         backward_handle = target_layer.register_backward_hook(backward_hook)
-        print("[DEBUG] Hooks registered")
 
-        # 4. Forward pass - modified for VGG16_Base_224
+        # Forward pass
         with torch.set_grad_enabled(True):
-            print("[DEBUG] Running forward pass...")
-            
-            # Get features from the model
             features = model_to_use.features(in_tensor)
             pooled_features = model_to_use.adaptive_pool(features)
             output = pooled_features.view(pooled_features.size(0), -1)
-            
-            print(f"[DEBUG] Model output shape: {output.shape}")
 
             # Simulate relevance via similarity
-            sim_score = -torch.norm(output - reference_embedding.unsqueeze(0), p=2) 
-
+            sim_score = -torch.norm(output - reference_embedding.unsqueeze(0), p=2)
             model_to_use.zero_grad()
-            print("[DEBUG] Running backward pass using L2 distance...")
             sim_score.backward(retain_graph=True)
-            print("[DEBUG] Backward pass completed")
 
-        # 5. Remove hooks
+        # Remove hooks
         forward_handle.remove()
         backward_handle.remove()
-        print("[DEBUG] Hooks removed")
 
-        # 6. Verify activations/gradients
-        if not activations:
-            print("[ERROR] No activations captured!")
-            raise RuntimeError("No activations captured")
-        if not gradients:
-            print("[ERROR] No gradients captured!")
-            raise RuntimeError("No gradients captured")
-            
-        print(f"[DEBUG] Activations shape: {activations[0].shape}")
-        print(f"[DEBUG] Gradients shape: {gradients[0].shape}")
+        # Verify activations/gradients
+        if not activations or not gradients:
+            raise RuntimeError("No activations or gradients captured")
 
-        # 7. Compute CAM
+        # Compute CAM
         weights = torch.mean(gradients[0], dim=(2, 3), keepdim=True)
-        print(f"[DEBUG] Weights shape: {weights.shape}")
-        
         cam = torch.sum(weights * activations[0], dim=1, keepdim=True)
         cam = torch.relu(cam)
-        print(f"[DEBUG] Raw CAM stats - min: {cam.min().item():.4f}, max: {cam.max().item():.4f}")
 
-        # 8. Enhanced normalization
+        # Enhanced normalization
         cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
         cam = torch.nn.functional.interpolate(
             cam,
@@ -240,14 +308,11 @@ def compute_cam_pytorch(in_tensor, reference_embedding, nn_module, target_layer_
             mode='bilinear',
             align_corners=False
         )
-        print(f"[DEBUG] Normalized CAM stats - min: {cam.min().item():.4f}, max: {cam.max().item():.4f}")
         
         return cam.squeeze().detach().cpu()
 
     except Exception as e:
-        print(f"[ERROR] CAM computation failed: {str(e)}")
-        raise
-
+        raise RuntimeError(f"CAM computation failed: {str(e)}")
 
 # Function: Compute InputXGradient
 #def compute_input_x_gradient(model, in_tensor, q_target):
@@ -269,28 +334,8 @@ def compute_cam_pytorch(in_tensor, reference_embedding, nn_module, target_layer_
     #attribution = GGC.attribute(inputs=in_tensor, target=q_target)
     #return attribution
 
-
-# Function: Compute Attributions
-def compute_attributions(model, in_tensor, q_target, method, **kwargs):
-    device = next(model.parameters()).device
-    in_tensor = in_tensor.to(device)
-    assert method in (
-        'IntegratedGradients',
-        'InputXGradient',
-        'GuidedGradCam',
-    ), 'Please provide a valid method.'
-
-    # Select attribution method
-    if method == 'IntegratedGradients':
-        attribution = compute_integrated_gradients(model, in_tensor, q_target)
-    elif method == 'InputXGradient':
-        attribution = compute_input_x_gradient(model, in_tensor, q_target)
-    elif method == 'GuidedGradCam':
-        attribution = compute_guided_grad_cam(model, kwargs['model_last_conv_layer'], in_tensor, q_target)
-    return attribution.to(device)
-
-def get_xai_attribution(model, in_tensor, method, backend='Captum', reference_tensor=None):
-    """Unified XAI computation for both backends"""
+def get_xai_attribution(model, in_tensor, method='IntegratedGradients', backend='Captum', reference_tensor=None, **kwargs):
+    """Unified XAI computation for both backends with ensemble support"""
     if backend == 'Captum':
         if method == 'IntegratedGradients':
             if reference_tensor is None:
@@ -305,17 +350,23 @@ def get_xai_attribution(model, in_tensor, method, backend='Captum', reference_te
                 model=model,
                 in_tensor=in_tensor,
                 target=0,  # For classification-style methods
-                method=method
+                method=method,
+                **kwargs
             )
-    else:
+    elif backend == 'MONAI':
+        if not MONAI_AVAILABLE:
+            raise ImportError("MONAI is not available. Please install monai package.")
         return compute_monai_results(
             in_tensor=in_tensor,
             class_idx=0,
             method=method,
             model=model
         )
+    else:
+        raise ValueError(f"Unknown backend: {backend}")
 
 def process_cam_to_heatmap(cam, img_tensor):
+    """Convert CAM output to heatmap"""
     cam_np = cam.numpy()
     if len(cam_np.shape) == 3:
         cam_np = np.mean(cam_np, axis=0)
@@ -325,9 +376,17 @@ def process_cam_to_heatmap(cam, img_tensor):
     return cam_np
 
 def process_ig_to_heatmap(attributions):
+    """Convert IG attributions to heatmap"""
     attr_np = attributions.detach().cpu().squeeze().numpy()
     if attr_np.ndim == 3:
         attr_np = np.mean(attr_np, axis=0)
     attr_np = (attr_np - attr_np.mean()) / (attr_np.std() + 1e-8)
     attr_np = np.clip(attr_np, -3, 3)
     return (attr_np - attr_np.min()) / (attr_np.max() - attr_np.min() + 1e-8)
+
+def process_sbsm_to_heatmap(saliency_map):
+    """Process SBSM output to standardized heatmap"""
+    saliency_map = np.maximum(saliency_map, 0)
+    if saliency_map.max() > 0:
+        saliency_map = (saliency_map - saliency_map.min()) / (saliency_map.max() - saliency_map.min() + 1e-8)
+    return saliency_map

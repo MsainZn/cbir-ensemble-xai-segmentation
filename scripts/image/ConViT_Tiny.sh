@@ -12,7 +12,7 @@ echo "Training Catalogue Type: E"
 python src/main_image.py \
  --gpu_id 0 \
  --config_json config/image/E/ConViT_Tiny.json \
- --pickles_path pickles/E_segmented \
+ --pickles_path pickles/E \
  --results_path results \
  --train_or_test train
 echo "Finished"

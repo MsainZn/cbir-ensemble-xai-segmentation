@@ -697,7 +697,7 @@ class ResNeXt50_32x4d_Base_224(nn.Module):
         
         # Set target layer for CAM
         self.cam_target_layer = self._determine_target_layer()
-        print(f"Initialized with CAM target layer: {self.cam_target_layer}")
+        #print(f" ResNeXt Initialized with CAM target layer: {self.cam_target_layer}")
         self._verify_target_layer()
 
     def _determine_target_layer(self):
@@ -803,7 +803,7 @@ class DenseNet121_Base_224(nn.Module):
         
         # Set target layer with flexible naming
         self.cam_target_layer = self._determine_target_layer()
-        print(f"Initialized with CAM target layer: {self.cam_target_layer}")
+        #print(f"DenseNet Initialized with CAM target layer: {self.cam_target_layer}")
         
         # Verify the layer exists
         self._verify_target_layer()

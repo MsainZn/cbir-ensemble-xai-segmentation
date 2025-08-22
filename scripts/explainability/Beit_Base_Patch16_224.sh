@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --partition=gpu_min24gb
-#SBATCH --qos=gpu_min24gb_ext
+#SBATCH --partition=gpu_min11gb
+#SBATCH --qos=gpu_min11gb_ext
 #SBATCH --job-name=cind_breloai_att_ret
 #SBATCH --output=results/Beit_Base_Patch16_224.out
 #SBATCH --error=results/Beit_Base_Patch16_224.err
@@ -14,16 +14,16 @@ export CUDA_VISIBLE_DEVICES=0
 python src/main_image.py \
  --visualizations_path "$VIS_DIR" \
  --gpu_id 0 \
- --pickles_path 'pickles/E' \
+ --pickles_path 'pickles/F' \
  --verbose \
  --train_or_test 'test' \
- --visualize_triplets \
+ --visualize_queries \
  --generate_xai \
- --xai_backend Captum \
- --xai_method IntegratedGradients \
+ --max_visualizations 10 \
  --results_path 'results' \
- --checkpoint_path 'results/2025-06-19_06-57-17,BEIT_BBB_E' \
+ --checkpoint_path 'results/2025-08-06_15-07-04' \
+ --xai_backend 'Captum' \
+ --xai_method 'IntegratedGradients' \
  --xai_batch_size 1
 echo "Finished"
-
 

@@ -16,42 +16,43 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from scipy.ndimage import gaussian_filter
 
 # Local imports
-from xai_utils.utilities_xai import compute_attributions, compute_integrated_gradients
-from utilities_imgmodels import ModelEnsemble  
-from xai_utils.xai_visualization import visualize_rankings_with_xai
+from xai_utils.utilities_xai import compute_integrated_gradients, get_xai_attribution
+from xai_utils.xai_visualization import visualize_rankings_with_xai, visualize_triplet_with_xai
 from utilities_visualization import visualize_triplet
 
 # Class: TripletDataset, creating the triplets for PyTorch
 class TripletDataset(Dataset):
-
-    # Method: __init__
-    def __init__(self, QNS_list, transform):
-
-        # Class variables
+    def __init__(self, QNS_list=None, QNS_list_image=None, QNS_list_tabular=None, transform=None):
+        """
+        Initializes the TripletDataset by precomputing all triplet combinations for training.
+        """
         self.transform = transform
-
-        # Pre-compute all combination of the triplets
+        # Select source list depending on input type
+        if QNS_list is not None:
+            # Image-only mode
+            source_list = QNS_list
+        elif QNS_list_image is not None:
+            # Multimodal mode (use image data as primary)
+            source_list = QNS_list_image
+        else:
+            raise ValueError("Must provide either QNS_list or QNS_list_image")
+        
+        # Pre-compute all combinations of triplets for training
         self.triplets = []
-        for qns_element in QNS_list:
+        for qns_element in source_list:
             for pair in combinations(range(qns_element.neighbor_count), 2):
-                self.triplets.append(
-                    (
-                        qns_element.query_vector,
-                        qns_element.neighbor_vectors[pair[0]],
-                        qns_element.neighbor_vectors[pair[1]]
-                    )
-                )
+                self.triplets.append((
+                    qns_element.query_vector,
+                    qns_element.neighbor_vectors[pair[0]],
+                    qns_element.neighbor_vectors[pair[1]]
+                ))
 
-        return
-
-
-    # Method: __len__
     def __len__(self):
+        """Returns the number of triplets in the dataset."""
         return len(self.triplets)
 
-
-    # Method: __getitem__
     def __getitem__(self, index):
+        """Retrieves a single triplet and applies the transform to each image."""
         query, pos, neg = self.triplets[index]
         return {
             'query': self.transform(query),  
@@ -59,32 +60,21 @@ class TripletDataset(Dataset):
             'neg': self.transform(neg)
         }
 
+    def print_triplets(self):
+        """Optional function that returns triplets"""
+        for i in self.triplets:
+            print(i)
+        return
+
 def train_model(model, train_loader, test_loader, QNS_list_train, QNS_list_test, optimizer, criterion, num_epochs, device, path_save, wandb_run):
     """
     Trains a model using triplet loss and logs metrics to Weights & Biases (WandB).
-
-    Args:
-        model: Model to train.
-        train_loader: DataLoader for training data.
-        test_loader: DataLoader for test data.
-        QNS_list_train: List of training QNS objects.
-        QNS_list_test: List of test QNS objects.
-        optimizer: Optimizer for training.
-        criterion: Loss function (e.g., TripletMarginLoss).
-        num_epochs: Number of training epochs.
-        device: Device (CPU/GPU).
-        path_save: Path to save model checkpoints.
-        wandb_run: Active WandB run object (for logging).
-    
-    Returns:
-        model: Trained model.
-        final_epoch_loss: Loss from the last epoch.
-        best_epoch: Best epoch based on test accuracy.
     """
     model.to(device)
     best_acc = float('-inf')
     best_epoch = 0
-
+    
+    # Training loop
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -98,12 +88,19 @@ def train_model(model, train_loader, test_loader, QNS_list_train, QNS_list_test,
             
             optimizer.zero_grad()
             
-            # Forward pass
-            anchor_embeddings = model(queries)
-            pos_embeddings = model(positives)
-            neg_embeddings = model(negatives)
+            # Forward pass - handle ensemble models
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                # Ensemble model: average embeddings from all models
+                anchor_embeddings = torch.mean(torch.stack([m(queries) for m in model.models]), dim=0)
+                pos_embeddings = torch.mean(torch.stack([m(positives) for m in model.models]), dim=0)
+                neg_embeddings = torch.mean(torch.stack([m(negatives) for m in model.models]), dim=0)
+            else:
+                # Single model
+                anchor_embeddings = model(queries)
+                pos_embeddings = model(positives)
+                neg_embeddings = model(negatives)
             
-            # Compute loss
+            # Compute triplet loss
             loss = criterion(anchor_embeddings, pos_embeddings, neg_embeddings)
             batch_losses.append(loss.item())  # Store loss
             
@@ -134,18 +131,12 @@ def train_model(model, train_loader, test_loader, QNS_list_train, QNS_list_test,
                 "test_ndcg": test_ndcg
             })
 
-        # Save best model
+        # Save best model checkpoint
         if test_acc > best_acc:
             best_acc = test_acc
             best_epoch = epoch
-            if isinstance(model, ModelEnsemble):
-                # Save each component separately
-                for i, component in enumerate(model.models):
-                    torch.save(component.state_dict(), os.path.join(path_save, f"component_{i}_best_epoch{epoch}.pt"))
-                    torch.save(component.state_dict(), os.path.join(path_save, f"component_{i}_final.pt"))
-            else:
-                torch.save(model.state_dict(), os.path.join(path_save, f"model_best_epoch{epoch}.pt"))
-                torch.save(model.state_dict(), os.path.join(path_save, "model_final.pt"))
+            torch.save(model.state_dict(), os.path.join(path_save, f"model_best_epoch{epoch}.pt"))
+            torch.save(model.state_dict(), os.path.join(path_save, "model_final.pt"))
 
         # Print epoch summary
         print(f"Epoch {epoch + 1}/{num_epochs} | "
@@ -156,59 +147,71 @@ def train_model(model, train_loader, test_loader, QNS_list_train, QNS_list_test,
               f"Test nDCG: {test_ndcg:.4f}")
 
     return model, epoch_loss, best_epoch
-            
-def eval_model(model, eval_loader, QNS_list_eval, device, visualize=False, output_dir=None, 
-               xai_method=None, xai_backend=None):
-    """Evaluation function with optional visualization support
-    
-    Args:
-        model: Model to evaluate
-        eval_loader: DataLoader for evaluation
-        QNS_list_eval: List of query-neighbor sets for nDCG calculation
-        device: Device to run evaluation on
-        visualize: Whether to generate visualizations
-        output_dir: Directory to save visualizations
-        xai_method: XAI method to use (if None, no XAI)
-        xai_backend: XAI backend to use ('Captum' or 'MONAI')
+
+def eval_model(model, eval_loader, QNS_list_eval, device, visualize=False, output_dir=None, max_visualizations=None, generate_xai=False, transform=None, xai_method=None, xai_backend=None):
+    """
+    Evaluation function with optional visualization support
     """
     model.to(device)
     model.eval()
-
-    eval_acc = evaluate_triplets(model, eval_loader, device, visualize=visualize, output_dir=output_dir)
     
-    # Only calculate nDCG and visualize if requested
+    # Evaluate triplet accuracy
+    eval_acc = evaluate_triplets(
+        model,
+        eval_loader,
+        device,
+        visualize=visualize,
+        output_dir=output_dir,
+        max_visualizations=max_visualizations,  
+        generate_xai=generate_xai,              
+        transform=transform,
+        xai_method=xai_method,
+        xai_backend=xai_backend
+    )
+
     eval_ndcg = None
-    if visualize or QNS_list_eval is not None:
+    # Compute nDCG if QNS_list_eval is provided
+    if QNS_list_eval is not None:
         eval_ndcg = evaluate_ndcg(
-            QNS_list_eval, 
-            model, 
-            transform=model.get_transform(), 
+            QNS_list_eval,
+            model,
+            transform=model.get_transform(),
             device=device,
-            visualize=visualize,
+            visualize=False,         
             output_dir=output_dir,
-            xai_method=xai_method,  
-            xai_backend=xai_backend
         )[0]
 
     return eval_acc, eval_ndcg
-    
-def evaluate_triplets(model, data_loader, device, visualize=False, output_dir=None):
+
+def evaluate_triplets(model, data_loader, device, visualize=False, output_dir=None, max_visualizations=None, generate_xai=False, transform=None, xai_method=None, xai_backend=None):
+    """
+    Evaluates the model on triplet data and optionally generates visualizations.
+    """
     model.eval()
     total_triplets = 0
     correct_predictions = 0
     triplet_info = []
     
+    # Iterate over batches
     with torch.no_grad():
         for batch_idx, data in enumerate(data_loader):
             queries = data['query'].to(device)
             positives = data['pos'].to(device)
             negatives = data['neg'].to(device)
             
-            anchor_embeddings = model(queries)
-            pos_embeddings = model(positives)
-            neg_embeddings = model(negatives)
+            # Forward pass - handle ensemble models
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                # Ensemble model: average embeddings from all models
+                anchor_embeddings = torch.mean(torch.stack([m(queries) for m in model.models]), dim=0)
+                pos_embeddings = torch.mean(torch.stack([m(positives) for m in model.models]), dim=0)
+                neg_embeddings = torch.mean(torch.stack([m(negatives) for m in model.models]), dim=0)
+            else:
+                # Single model
+                anchor_embeddings = model(queries)
+                pos_embeddings = model(positives)
+                neg_embeddings = model(negatives)
             
-            # Compute distances
+            # Compute distances between anchor and positive/negative
             pos_distances = torch.norm(anchor_embeddings - pos_embeddings, p=2, dim=1)
             neg_distances = torch.norm(anchor_embeddings - neg_embeddings, p=2, dim=1)
             
@@ -219,6 +222,7 @@ def evaluate_triplets(model, data_loader, device, visualize=False, output_dir=No
             correct_predictions += batch_correct.sum().item()
             total_triplets += queries.size(0)
 
+            # Collect info for visualization
             if visualize and output_dir:
                 for i in range(len(queries)):
                     query_path = data_loader.dataset.triplets[batch_idx * data_loader.batch_size + i][0]
@@ -241,51 +245,58 @@ def evaluate_triplets(model, data_loader, device, visualize=False, output_dir=No
                         'p_name': p_name,
                         'n_name': n_name
                     })
-
-    # Save visualizations sorted by loss (highest first)
+    
+    # Save visualizations if requested
     if visualize and output_dir and triplet_info:
         triplet_dir = os.path.join(output_dir, "triplets")
-        os.makedirs(triplet_dir, exist_ok=True)
-        triplet_info.sort(key=lambda x: -x['loss'])
+        from utilities_visualization import visualize_all_triplets
         
-        for idx, info in enumerate(triplet_info):
-            save_name = f"L-{info['loss']:.4f}_Q-{info['q_name']}_P-{info['p_name']}_N-{info['n_name']}.png"
-            save_path = os.path.join(triplet_dir, save_name)
-            
-            visualize_triplet(
-                query_path=info['q_path'],
-                pos_path=info['p_path'],
-                neg_path=info['n_path'],
-                pos_distance=info['pos_dist'],
-                neg_distance=info['neg_dist'],
-                loss_value=info['loss'],
-                correct=info['correct'],
-                save_path=save_path
-            )
+        visualize_all_triplets(
+            triplet_info=triplet_info,
+            output_dir=triplet_dir,
+            max_visualizations=max_visualizations,
+            generate_xai=generate_xai,
+            model=model,
+            device=device,
+            transform=transform,
+            xai_method=xai_method,
+            xai_backend=xai_backend
+        )
 
     accuracy = correct_predictions / total_triplets
     return accuracy
-
-# Function: Evaluate models using nDCG metric adjusted
-def evaluate_ndcg(QNS_list, model, transform, device, visualize=False, output_dir=None, xai_method='IntegratedGradients', xai_backend='Captum'):
+    
+def evaluate_ndcg(QNS_list, model, transform, device, visualize=False, output_dir=None):
+    """
+    Evaluates the model using the nDCG metric for ranking quality.
+    """
     final_order = []
     rev_orders = []
     model.eval()
     
+    # Iterate over QNS_list for nDCG evaluation
     with torch.no_grad():
         for i, q_element in enumerate(QNS_list):
-            fss = []
-            rss = []
-
             # Load and transform the query image
             query_tensor = transform(q_element.query_vector).unsqueeze(0).to(device)
-            vec_ref = model(query_tensor)
+            
+            # Handle ensemble models
+            if hasattr(model, 'models') and isinstance(model.models, list):
+                vec_ref = torch.mean(torch.stack([m(query_tensor) for m in model.models]), dim=0)
+            else:
+                vec_ref = model(query_tensor)
             
             # Get all neighbor distances
             distances = []
             for neighbor_path in q_element.neighbor_vectors:
                 neighbor_tensor = transform(neighbor_path).unsqueeze(0).to(device)
-                vec_i = model(neighbor_tensor)
+                
+                # Handle ensemble models
+                if hasattr(model, 'models') and isinstance(model.models, list):
+                    vec_i = torch.mean(torch.stack([m(neighbor_tensor) for m in model.models]), dim=0)
+                else:
+                    vec_i = model(neighbor_tensor)
+                
                 distf = torch.norm(vec_ref - vec_i)
                 distances.append(distf.item())
             
@@ -296,44 +307,26 @@ def evaluate_ndcg(QNS_list, model, transform, device, visualize=False, output_di
             
             final_order.append(distances)
             rev_orders.append([len(q_element.neighbor_vectors)-count for count in range(len(q_element.neighbor_vectors))])
-            
-            # Visualize if requested
-            if visualize and output_dir:
-                save_path = os.path.join(output_dir, f'ranking_{i}.png')
-                visualize_rankings_with_xai(
-                    q_element.query_vector,
-                    q_element.neighbor_vectors,
-                    model_ordering,
-                    gt_ordering,
-                    model=model,
-                    device=device,
-                    transform=transform,
-                    save_path=save_path,
-                    xai_method=xai_method,
-                    xai_backend=xai_backend  
-                )
 
+    # Calculate nDCG accuracy
     model_acc = 100 * np.mean((test_ndcg(final_order) - test_ndcg(rev_orders))/(1 - test_ndcg(rev_orders)))
-
     return model_acc, final_order
 
-# Function: Calculate nDCG using sorted distances
 def test_ndcg(distances):       
-  res = np.zeros(len(distances))
-  for i in range(len(distances)):
-    dcg_aux = 0
-    idcg_aux = 0
-    ndcg = 0
-    dist = distances[i]
-    sorted_indexes = np.argsort(dist)
-    new_array = np.argsort(sorted_indexes) #Contains the position of each patient in an ordered list
-    for z in range(len(dist)):      
-      dcg_aux += (len(dist)-z) / (np.log(new_array[z]+2)/np.log(2))
-      idcg_aux += (len(dist)-z) / (np.log(z+2)/np.log(2))
-
-    res[i]= dcg_aux/idcg_aux
-
-  return res
-
-
-    
+    """
+    Calculates nDCG for a list of distance arrays.
+    """
+    res = np.zeros(len(distances))
+    # Calculate nDCG for each distance list
+    for i in range(len(distances)):
+        dcg_aux = 0
+        idcg_aux = 0
+        ndcg = 0
+        dist = distances[i]
+        sorted_indexes = np.argsort(dist)
+        new_array = np.argsort(sorted_indexes) # Contains the position of each patient in an ordered list
+        for z in range(len(dist)):
+            dcg_aux += (len(dist)-z) / (np.log(new_array[z]+2)/np.log(2))
+            idcg_aux += (len(dist)-z) / (np.log(z+2)/np.log(2))
+        res[i]= dcg_aux/idcg_aux
+    return res

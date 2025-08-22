@@ -14,22 +14,22 @@ python src/main_image.py \
  --train_or_test 'train'
 echo "Finished"
 
-echo "Training Catalogue Type: F"
-python src/main_image.py \
- --gpu_id 0 \
- --config_json 'config/image/F/Beit_Base_Patch16_224.json' \
- --pickles_path 'pickles/F' \
- --results_path 'results' \
- --train_or_test 'train'
-echo "Finished"
-
 #echo "Training Catalogue Type: F"
-# python src/main_image.py \
-#  --gpu_id 0 \
-#  --config_json 'config/image/F/Beit_Base_Patch16_224.json' \
-#  --pickles_path 'pickles/F' \
-#  --results_path 'results' \
-#  --train_or_test 'train'
+#python src/main_image.py \
+# --gpu_id 0 \
+# --config_json 'config/image/F/Beit_Base_Patch16_224.json' \
+# --pickles_path 'pickles/F' \
+# --results_path 'results' \
+# --train_or_test 'train'
+#echo "Finished"
+
+#echo "Testing Catalogue Type: E"
+#python src/main_image.py \
+# --gpu_id 0 \
+# --pickles_path 'pickles/E' \
+# --verbose \
+# --train_or_test 'test' \
+# --checkpoint_path 'results/2025-08-13_14-42-49'
 #echo "Finished"
 
 #echo "Testing Catalogue Type: F"
@@ -38,5 +38,5 @@ echo "Finished"
 # --pickles_path 'pickles/F' \
 # --verbose \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/2025-03-24_10-12-18'
+# --checkpoint_path 'results/2025-08-06_15-07-04'
 #echo "Finished"

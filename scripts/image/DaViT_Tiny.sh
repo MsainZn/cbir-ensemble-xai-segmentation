@@ -2,8 +2,8 @@
 #SBATCH --partition=gpu_min24gb
 #SBATCH --qos=gpu_min24gb_ext
 #SBATCH --job-name=cind_breloai_att_ret
-#SBATCH --output=results/DaViT_Tiny.out
-#SBATCH --error=results/DaViT_Tiny.err
+#SBATCH --output=Cinderella_Pedro/results/DaViT_Tiny.out
+#SBATCH --error=Cinderella_Pedro/results/DaViT_Tiny.err
 
 
 
@@ -22,9 +22,9 @@ echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 #python src/main_image.py \
 # --gpu_id 0 \
 # --config_json 'config/image/E/DaViT_Tiny.json' \
-# --pickles_path 'pickles/E' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/E' \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/E/2024-11-16_22-23-51/' \
+# --checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/E/2024-11-16_22-23-51/' \
 # --verbose
 #echo "Finished"
 
@@ -39,8 +39,8 @@ echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 #echo "Testing Catalogue Type: F"
 #python src/main_image.py \
 # --gpu_id 0 \
-# --pickles_path 'pickles/F' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/F' \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/F/2024-11-17_02-20-44/' \
+# --checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/F/2024-11-17_02-20-44/' \
 # --verbose
 #echo "Finished"

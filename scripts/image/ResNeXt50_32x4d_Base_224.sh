@@ -9,7 +9,7 @@ echo "Training Catalogue Type: E"
 python src/main_image.py \
  --gpu_id 0 \
  --config_json 'config/image/E/ResNeXt50_32x4d_Base_224.json' \
- --pickles_path 'pickles/E_bounding_box_bigger' \
+ --pickles_path 'pickles/E' \
  --results_path 'results' \
  --train_or_test 'train'
 echo "Finished"
@@ -18,7 +18,7 @@ echo "Training Catalogue Type: E"
 python src/main_image.py \
  --gpu_id 0 \
  --config_json 'config/image/E/ResNeXt50_32x4d_Base_224.json' \
- --pickles_path 'pickles/E_bounding_box' \
+ --pickles_path 'pickles/E' \
  --results_path 'results' \
  --train_or_test 'train'
 echo "Finished"

@@ -19,10 +19,10 @@
 #echo "Testing Catalogue Type: E"
 #python src/main_image.py \
 # --gpu_id 0 \
-# --pickles_path 'pickles/E' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/E' \
 # --verbose \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/E/2024-11-16_22-11-38/'
+# --checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/E/2024-11-16_22-11-38/'
 #echo "Finished"
 
  echo "Training Catalogue Type: F"
@@ -36,8 +36,8 @@
 #echo "Testing Catalogue Type: F"
 #python src/main_image.py \
 # --gpu_id 0 \
-# --pickles_path 'pickles/F' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/F' \
 # --verbose \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/F/2024-11-17_04-54-50/'
+# --checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/F/2024-11-17_04-54-50/'
 #echo "Finished"

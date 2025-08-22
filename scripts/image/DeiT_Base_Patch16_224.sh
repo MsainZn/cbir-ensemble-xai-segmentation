@@ -12,16 +12,16 @@ echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
  python src/main_image.py \
   --gpu_id 0 \
   --config_json 'config/image/E/DeiT_Base_Patch16_224.json' \
-  --pickles_path 'pickles/E_segmented' \
+  --pickles_path 'pickles/E' \
   --results_path 'results' \
   --train_or_test 'train'
  echo "Finished"
 #echo "Testing Catalogue Type: E"
 #python src/main_image.py \
 # --gpu_id 0 \
-# --pickles_path 'pickles/E' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/E' \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/E/2024-11-17_04-23-52/' \
+# --checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/E/2024-11-17_04-23-52/' \
 # --verbose
 #echo "Finished"
 
@@ -29,15 +29,15 @@ echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 # python src/main_image.py \
 #  --gpu_id 0 \
 #  --config_json 'config/image/F/DeiT_Base_Patch16_224.json' \
-#  --pickles_path 'pickles/F' \
-#  --results_path 'results/F' \
+#  --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/F' \
+#  --results_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/F' \
 #  --train_or_test 'train'
 # echo "Finished"
 #echo "Testing Catalogue Type: F"
 #python src/main_image.py \
 # --gpu_id 0 \
-# --pickles_path 'pickles/F' \
+# --pickles_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/pickles/F' \
 # --train_or_test 'test' \
-# --checkpoint_path 'results/F/2024-11-17_10-17-31/' \
+#--checkpoint_path '/nas-ctm01/datasets/private/CINDERELLA/experiments/retrieval/tgoncalv/results/F/2024-11-17_10-17-31/' \
 # --verbose
 #echo "Finished"

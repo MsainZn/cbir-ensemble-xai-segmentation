@@ -1,9 +1,9 @@
 {
     "seed":10,
-    "lr":0.0001,
-    "num_epochs":100,
+    "lr":0.00001,
+    "num_epochs":80,
     "batch_size":16,
-    "margin":0.0001,
+    "margin":0.01,
     "split_ratio":0.8,
     "catalogue_type":"F",
     "doctor_code":-1,

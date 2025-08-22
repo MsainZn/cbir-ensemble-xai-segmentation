@@ -87,6 +87,24 @@ def setup_paths(args, config, timestamp):
     
     return path_save
 
+def safe_load(checkpoint_path, device):
+    """Safely load model checkpoint with error handling"""
+    try:
+        state_dict = torch.load(checkpoint_path, map_location='cpu')
+        # Handle different state dict formats
+        if 'model_state_dict' in state_dict:
+            state_dict = state_dict['model_state_dict']
+        elif 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        
+        # Remove any unwanted prefixes
+        state_dict = {k.replace('module.', '').replace('base_model.', ''): v 
+                     for k, v in state_dict.items()}
+        
+        return state_dict
+    except Exception as e:
+        raise RuntimeError(f"Error loading checkpoint {checkpoint_path}: {e}")
+
 def initialize_model(config, is_ensemble, device, checkpoint_path=None):
     """Initialize model with proper configuration"""
     if is_ensemble:
@@ -191,7 +209,7 @@ def run_ensemble_diagnostics(model, config, test_loader, QNS_list_image_test, de
     print("\n[2/2] Individual Model Performance:")
     for i, name in enumerate(config["model_names"]):
         try:
-            single_model = models_dict[name]().to(device)
+            single_model = initialize_model({"model_name": name}, False, device)
             if config["checkpoint_paths"] and i < len(config["checkpoint_paths"]):
                 single_model.load_state_dict(
                     torch.load(config["checkpoint_paths"][i], map_location=device),
@@ -254,20 +272,19 @@ def main():
     parser.add_argument('--checkpoint_path', type=str, help="Path to model checkpoints")
     parser.add_argument('--verbose', action='store_true', help="Verbose output")
     parser.add_argument('--ensemble_config', type=str, help="JSON file for ensemble configuration")
-    parser.add_argument('--visualize', action='store_true', help="Enable ranking visualizations")
     parser.add_argument('--visualizations_path', type=str, help="Path to save ranking visualizations")
-    parser.add_argument('--visualize_all', action='store_true', 
-                   help="Generate visualizations for all query images")
-    parser.add_argument('--max_visualizations', type=int, default=20,
-                   help="Maximum number of visualizations to generate")    
+    parser.add_argument('--visualize_queries', action='store_true', 
+                       help="Generate visualizations for all query images")
+    parser.add_argument('--max_visualizations', type=int, default=20000,
+                       help="Maximum number of visualizations to generate")    
     parser.add_argument('--visualize_triplets', action='store_true', 
-                   help="Generate visualizations for triplets")    
+                       help="Generate visualizations for triplets")    
     parser.add_argument('--generate_xai', action='store_true', help='Generate explanation maps')
-    parser.add_argument('--xai_backend', choices=['Captum','MONAI'], help='XAI library to use')
-    parser.add_argument('--xai_method', help='Specific explanation method') 
+    parser.add_argument('--xai_backend', choices=['Captum','MONAI'], default='Captum', help='XAI library to use')
+    parser.add_argument('--xai_method', default='IntegratedGradients', help='Specific explanation method') 
     parser.add_argument('--xai_batch_size', type=int, default=1, help='Batch size for XAI computations')          
     parser.add_argument('--use_tabular', action='store_true', default=False, 
-                   help="Whether to use tabular data along with images")
+                       help="Whether to use tabular data along with images")
     args = parser.parse_args()
 
     # Setup core components
@@ -304,7 +321,7 @@ def main():
     )
 
     # Run diagnostics if requested
-    if args.verbose and isinstance(model, ModelEnsemble):
+    if args.verbose and is_ensemble:
         run_ensemble_diagnostics(model, config, test_loader, QNS_list_image_test, device)
 
     # Training or evaluation
@@ -332,14 +349,15 @@ def main():
             wandb_run.finish()
     else:
         # Evaluation mode
-        if args.visualize_all:
+        if args.visualize_queries:
             visualize_all_queries(
                 model=model,
                 QNS_lists={'test': QNS_list_image_test},
                 transform=model.get_transform(),
                 device=device,
                 output_dir=args.visualizations_path,
-                max_visualizations=min(args.max_visualizations, 500),
+                max_visualizations=args.max_visualizations,
+                generate_xai=args.generate_xai,
                 xai_method=args.xai_method if args.generate_xai else None,
                 xai_backend=args.xai_backend if args.generate_xai else None
             )
@@ -347,35 +365,30 @@ def main():
             train_acc, train_ndcg = eval_model(
                 model=model,
                 eval_loader=train_loader,
-                QNS_list_eval=QNS_list_image_train if args.visualize else None,
+                QNS_list_eval=QNS_list_image_train,
                 device=device,
-                visualize=args.visualize_triplets,
-                output_dir=args.visualizations_path,
-                xai_method=args.xai_method,
-                xai_backend=args.xai_backend
+                visualize=False,
+                output_dir=None,
+                max_visualizations=0,
+                generate_xai=False,
+                transform=model.get_transform(),
+                xai_method=None,
+                xai_backend=None
             )
             
             test_acc, test_ndcg = eval_model(
                 model=model,
                 eval_loader=test_loader,
-                QNS_list_eval=QNS_list_image_test if args.visualize else None,
+                QNS_list_eval=QNS_list_image_test,
                 device=device,
                 visualize=args.visualize_triplets,
                 output_dir=args.visualizations_path,
-                xai_method=args.xai_method,
-                xai_backend=args.xai_backend
+                max_visualizations=args.max_visualizations,
+                generate_xai=args.generate_xai,
+                transform=model.get_transform(),
+                xai_method=args.xai_method if args.generate_xai else None,
+                xai_backend=args.xai_backend if args.generate_xai else None
             )
-            
-            if args.generate_xai:
-                visualize_rankings_with_xai(
-                    model=model,
-                    device=device,
-                    eval_dataloader=test_loader,
-                    xai_backend=args.xai_backend,
-                    xai_method=args.xai_method,
-                    results_dir=args.results_path,
-                    batch_size=args.xai_batch_size
-                )
 
             # Save evaluation results
             pd.DataFrame({

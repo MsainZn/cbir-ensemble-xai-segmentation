@@ -36,7 +36,7 @@ echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 #echo "Finished"
 
 echo "Testing Catalogue Type: F"
-python src/main_image_ensemble.py \
+python src/main_image.py \
  --gpu_id 0 \
  --pickles_path 'pickles256/F' \
  --verbose \
