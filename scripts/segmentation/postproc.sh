@@ -10,7 +10,7 @@
 echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 echo "Starting segmentation post-processing..."
 
-python src/segmentation_utils/Segmentation_post_processing.py \
+python src/segmentation_utils/SegmentationPostProcessing.py \
   --input_folder "breloai-rsz-v2_segmented_debug" \
   --output_folder "post_processed_output"
 

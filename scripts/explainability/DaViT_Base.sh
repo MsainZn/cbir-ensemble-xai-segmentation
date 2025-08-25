@@ -22,5 +22,7 @@ python src/main_image.py \
  --max_visualizations 10 \
  --results_path 'results' \
  --checkpoint_path '/nas-ctm01/homes/pferreira/Cinderella_Pedro/results/2025-08-06_19-38-58' \
+ --xai_backend 'Captum' \
+ --xai_method 'IntegratedGradients' \
  --xai_batch_size 1
 echo "Finished"

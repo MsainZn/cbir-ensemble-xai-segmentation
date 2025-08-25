@@ -10,7 +10,7 @@
 echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 echo "Starting bounding box processing..."
 
-python src/segmentation_utils/segmentation_BoundingBox.py \
+python src/segmentation_utils/SegmentationBoundingBox.py \
   --input_folder "segmentation_post_proc" \
   --output_folder "bounding_box_output"
 

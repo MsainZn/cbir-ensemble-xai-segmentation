@@ -21,5 +21,7 @@ python src/main_image.py \
  --max_visualizations 10 \
  --results_path 'results' \
  --checkpoint_path 'results/2025-06-19_06-57-17,ResNext_E' \
+ --xai_backend 'Captum' \
+ --xai_method 'IntegratedGradients' \
  --xai_batch_size 1
 echo "Finished"

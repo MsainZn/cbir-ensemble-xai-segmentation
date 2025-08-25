@@ -148,24 +148,9 @@ def compute_monai_results(in_tensor, class_idx, method, model):
     if method == 'GradCAM':
         gradcam = GradCAM(model_to_use, target_layers="features.17")
         return gradcam(in_tensor, class_idx)
-    elif method == 'GradCAMpp':
-        gradcampp = GradCAMpp(model_to_use, target_layers="features.17")
-        return gradcampp(in_tensor, class_idx)
     elif method == 'CAM':
         cam = CAM(model_to_use, target_layers="features.17")
         return cam(in_tensor, class_idx)
-    elif method == 'GuidedBackpropGrad':
-        gbp = GuidedBackpropGrad(model_to_use)
-        return gbp(in_tensor, class_idx)
-    elif method == 'GuidedBackpropSmoothGrad':
-        gbps = GuidedBackpropSmoothGrad(model_to_use)
-        return gbps(in_tensor, class_idx)
-    elif method == 'SmoothGrad':
-        sg = SmoothGrad(model_to_use)
-        return sg(in_tensor, class_idx)
-    elif method == 'VanillaGrad':
-        vg = VanillaGrad(model_to_use)
-        return vg(in_tensor, class_idx)
     else:
         raise ValueError(f"Unknown MONAI method: {method}")
 

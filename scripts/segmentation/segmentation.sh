@@ -9,7 +9,7 @@
 echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 echo "Starting breast segmentation pipeline..."
 
-python src/segmentation_utils/Segmentation_application.py \
+python src/segmentation_utils/SegmentationApplication.py \
   --input_folder "breloai-rsz-v2-1024_copy" \
   --output_segmented "breloai-rsz-v2_segmented" \
   --output_debug "breloai-rsz-v2_segmented_debug" \

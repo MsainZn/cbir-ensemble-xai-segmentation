@@ -10,7 +10,7 @@
 echo "CINDERELLA BreLoAI Retrieval: A Study with Attention Mechanisms"
 echo "Starting mask overlap processing..."
 
-python src/segmentation_utils/segmentation_overlap.py \
+python src/segmentation_utils/SegmentationOverlap.py \
   --new_original_folder "breloai-rsz-v2-1024_copy" \
   --mask_folder "preproc_defected_img_corrected" \
   --output_folder "correct_defected"
