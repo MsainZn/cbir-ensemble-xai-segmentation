@@ -1,4 +1,4 @@
-# cbir-feature-extractors
+# cbir-ensemble-xai-segmentation
 This repository contains a framework for **Content-Based Image Retrieval (CBIR)** with support for **explainability (XAI), and segmentation**.  
 It provides training and testing pipelines for deep learning models, post-hoc explainability methods (e.g., saliency maps), and segmentation utilities.  
 
