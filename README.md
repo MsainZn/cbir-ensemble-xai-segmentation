@@ -73,7 +73,7 @@ This script accepts the following command line arguments:
 ```
 
 ### Segmentation
-For segmentation application:
+#### For segmentation application:
 ```bash
 $ python src/segmentation_utils/SegmentationApplication.py {command line arguments}
 ```
@@ -89,7 +89,7 @@ This script accepts the following command line arguments:
   --segmentation_model_path: path to the pretrained segmentation model
 ```
 
-For segmentation overlap:
+#### For segmentation overlap:
 ```bash
 $ python src/segmentation_utils/SegmentationOverlap.py {command line arguments}
 ```
@@ -104,7 +104,7 @@ This script accepts the following command line arguments:
   --output_folder: path to save the overlap results
 ```
 
-For segmentation postprocessing:
+#### For segmentation postprocessing:
 ```bash
 $ python src/segmentation_utils/SegmentationPostProcessing.py {command line arguments}
 ```
@@ -118,7 +118,7 @@ This script accepts the following command line arguments:
   --output_folder: path to save the results of mask post processing
 ```
 
-For creating bounding box images containing segmented breasts:
+#### For creating bounding box images containing segmented breasts:
 ```bash
 $ python src/segmentation_utils/SegmentationBoundingBox.py {command line arguments}
 ```
