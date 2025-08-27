@@ -13,6 +13,24 @@ Then go to the repository's main directory:
 $ cd cbir-ensemble-xai-segmentation
 ```
 ## Usage
+### Create pickle files
+To create the pickle files used for training the model:
+```bash
+$ python src/main_dataproc.py {command line arguments}
+```
+or:
+```bash
+$ sbatch scripts\preproc\E.sh
+```
+This script accepts the following command line arguments:
+```bash
+ --config_json: path to the json file containing the data creation details
+ --images_resized_path: path to store preprocessed, resized images
+ --images_original_path: path to the original images folder
+ --csvs_path: path to the csvs folder 
+ --pickles_path: path to store the pickle files
+```
+
 ### Train Model
 To train the models:
 ```bash
@@ -71,7 +89,6 @@ This script accepts the following command line arguments:
  --xai_batch_size: batch size during XAI application
  --gpu_id
 ```
-
 ### Segmentation
 #### For segmentation application:
 ```bash
